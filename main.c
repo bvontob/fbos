@@ -2,11 +2,10 @@
 #include "biquad.h"
 #include "delay_line.h"
 
+#define MIN_Q            M_SQRT2
 #define MAX_Q            60
 #define DELAY_LINE_SIZE  2048
-#define WHITE_NOISE_GAIN 0.1f
-#define DELAY_TAPS       9
-#define DELAY_TAP_GAIN   ((1.0f - WHITE_NOISE_GAIN) / (float)(DELAY_TAPS))
+#define DELAY_TAPS       7
 
 static biquad bp;
 static biquad *bpp = &bp;
@@ -19,14 +18,25 @@ static delay_line *dlp = &dl;
 
 float dl_ram[DELAY_LINE_SIZE] __sdram;
 
-static float q = 20.0f;
+static struct parameters {
+  float reso;
+  float nois;
+  float q;
+} p;
 
 void OSC_INIT(uint32_t platform, uint32_t api) {
   (void)platform; (void)api;
+  
   biquad_flush(bpp);
   biquad_so_dc(dcfp, 0.0f);
   biquad_flush(dcfp);
   delay_line_init(dlp, dl_ram, DELAY_LINE_SIZE);
+  
+  /*
+   * Agitate the feedback loop with a click -- or we won't get any
+   * sound at all if the noise is turned down in the mix.
+   */
+  delay_line_write(dlp, 0.001f);
 }
 
 void OSC_CYCLE(const user_osc_param_t * const params,
@@ -46,35 +56,29 @@ void OSC_CYCLE(const user_osc_param_t * const params,
   biquad_so_bp(bpp,
 	       fasttanfullf(M_PI * biquad_wc(f,
 					     k_samplerate_recipf)),
-	       q);
+	       p.q);
+
+  const float noise_gain     = p.nois;
+  const float reso_tap_gain  = p.reso / 2.0f;
+  const float delay_tap_gain = ((1.0f - p.nois - p.reso)
+				/ (float)(DELAY_TAPS));
   
   q31_t * __restrict y = (q31_t *)yn;
   const q31_t * y_e = y + frames;
   
   for (; y != y_e; ) {
     float sig = 0;
-    
-    sig += clip1m1f(WHITE_NOISE_GAIN * _osc_white()
-		    + DELAY_TAP_GAIN * delay_line_read(dlp, vtap1)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp, vtap2)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,   283)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,   419)
-		    // + DELAY_TAP_GAIN * delay_line_read(dlp,   547)
-		    // + DELAY_TAP_GAIN * delay_line_read(dlp,   661)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,   811)
-		    // + DELAY_TAP_GAIN * delay_line_read(dlp,   947)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,  1087)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,  1229)
-		    // + DELAY_TAP_GAIN * delay_line_read(dlp,  1381)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,  1523)
-		    // + DELAY_TAP_GAIN * delay_line_read(dlp,  1663)
-		    + DELAY_TAP_GAIN * delay_line_read(dlp,  1823));
-    /*    sig += clip1m1f(0.2f * _osc_white()
-		    + 0.2f * delay_line_read(dlp, 289)
-		    + 0.2f * delay_line_read(dlp, 449)
-		    + 0.2f * delay_line_read(dlp, 912)
-		    + 0.1f * delay_line_read(dlp, 1333)
-		    + 0.1f * delay_line_read(dlp, 2031)); */
+   
+    sig += clip1m1f(noise_gain * _osc_white()
+		    + reso_tap_gain  * delay_line_read(dlp, vtap1)
+		    + reso_tap_gain  * delay_line_read(dlp, vtap2)
+		    + delay_tap_gain * delay_line_read(dlp,   283)
+		    + delay_tap_gain * delay_line_read(dlp,   419)
+		    + delay_tap_gain * delay_line_read(dlp,   811)
+		    + delay_tap_gain * delay_line_read(dlp,  1087)
+		    + delay_tap_gain * delay_line_read(dlp,  1229)
+		    + delay_tap_gain * delay_line_read(dlp,  1523)
+		    + delay_tap_gain * delay_line_read(dlp,  1823));
     
     sig = clip1m1f(osc_sat_schetzenf(sig));
     sig = clip1m1f(osc_sat_schetzenf(sig));
@@ -101,14 +105,21 @@ void OSC_PARAM(uint16_t idx, uint16_t val) {
   switch (idx) {
 
   case k_user_osc_param_id1:
+    p.reso = (float)val / 100.0f * 0.5f;
+    break;
+
+  case k_user_osc_param_id2:
+    p.nois = (float)val / 100.0f * 0.5f;
     break;
 
   case k_user_osc_param_shape:
-    (void)param_val_to_f32(val);
+    p.q = ((float)MIN_Q
+	   + (((float)MAX_Q - (float)MIN_Q)
+	      * (1.0f - param_val_to_f32(val))));
     break;
 
   case k_user_osc_param_shiftshape:
-    q = M_SQRT2 + (((float)MAX_Q - M_SQRT2) * (1.0f - param_val_to_f32(val)));
+    (void)param_val_to_f32(val);
     break;
   }
 }
