@@ -10,8 +10,8 @@
 static biquad bp;
 static biquad *bpp = &bp;
 
-static biquad dcf;
-static biquad *dcfp = &dcf;
+static biquad bp2;
+static biquad *bp2p = &bp2;
 
 static delay_line dl;
 static delay_line *dlp = &dl;
@@ -20,6 +20,9 @@ float dl_ram[DELAY_LINE_SIZE] __sdram;
 
 static struct parameters {
   float reso;
+  float ovrm;
+  float ovrq;
+  int   ovrt;
   float nois;
   float q;
 } p;
@@ -28,8 +31,7 @@ void OSC_INIT(uint32_t platform, uint32_t api) {
   (void)platform; (void)api;
   
   biquad_flush(bpp);
-  biquad_so_dc(dcfp, 0.0f);
-  biquad_flush(dcfp);
+  biquad_flush(bp2p);
   delay_line_init(dlp, dl_ram, DELAY_LINE_SIZE);
   
   /*
@@ -49,7 +51,8 @@ void OSC_CYCLE(const user_osc_param_t * const params,
   const float f1 = osc_notehzf(note + 1);
   const float f  = clipmaxf(linintf(mod * k_note_mod_fscale, f0, f1),
 			    k_note_max_hz);
-
+  const float fo = clipmaxf((float)(p.ovrt) + 2 * f, k_note_max_hz);
+  
   const uint32_t vtap1 = (uint32_t)((float)k_samplerate * 2 / f);
   const uint32_t vtap2 = vtap1 * 2;
   
@@ -57,6 +60,10 @@ void OSC_CYCLE(const user_osc_param_t * const params,
 	       fasttanfullf(M_PI * biquad_wc(f,
 					     k_samplerate_recipf)),
 	       p.q);
+  biquad_so_bp(bp2p,
+	       fasttanfullf(M_PI * biquad_wc(fo,
+					     k_samplerate_recipf)),
+	       p.ovrq);
 
   const float noise_gain     = p.nois;
   const float reso_tap_gain  = p.reso / 2.0f;
@@ -82,8 +89,9 @@ void OSC_CYCLE(const user_osc_param_t * const params,
     
     sig = clip1m1f(osc_sat_schetzenf(sig));
     sig = clip1m1f(osc_sat_schetzenf(sig));
-    sig = clip1m1f(biquad_process_so(bpp, sig));
-    // sig = clip1m1f(biquad_process_so(dcfp, sig));
+    const float sigo = clip1m1f(biquad_process_so(bp2p, sig));
+    sig = clip1m1f((1.0f - p.ovrm) * biquad_process_so(bpp, sig)
+		   + p.ovrm * sigo);
     sig = clip1m1f(osc_sat_schetzenf(sig));
     sig = clip1m1f(osc_sat_schetzenf(sig));
 
@@ -109,6 +117,20 @@ void OSC_PARAM(uint16_t idx, uint16_t val) {
     break;
 
   case k_user_osc_param_id2:
+    p.ovrm = (float)val / 100.0f;
+    break;
+
+  case k_user_osc_param_id3:
+    p.ovrq = ((float)MIN_Q
+	      + (((float)MAX_Q - (float)MIN_Q)
+		 * ((float)val / 100.0f)));
+    break;
+
+  case k_user_osc_param_id4:
+    p.ovrt = val + 2;
+    break;
+
+  case k_user_osc_param_id5:
     p.nois = (float)val / 100.0f * 0.5f;
     break;
 

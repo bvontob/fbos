@@ -8,9 +8,12 @@
         "prg_id" : 0,
         "version" : "1.0-0",
         "name" : "fbos",
-        "num_param" : 2,
+        "num_param" : 5,
         "params" : [
 	    ["reso",   0, 100, "%"],
+	    ["ovrm",   0, 100, "%"],
+	    ["ovrq",   0, 100, "%"],
+	    ["ovrt",   0,   4, "" ],
 	    ["nois",   0, 100, "%"]
         ]
     }
