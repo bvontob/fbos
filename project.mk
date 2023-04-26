@@ -8,7 +8,7 @@ UCSRC = main.c
 
 UCXXSRC =
 
-UINCDIR = inc
+UINCDIR = dsp
 
 UDEFS =
 

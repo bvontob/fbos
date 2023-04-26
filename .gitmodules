@@ -1,0 +1,3 @@
+[submodule "dsp"]
+	path = dsp
+	url = https://github.com/bvontob/logue-dsp-c.git
